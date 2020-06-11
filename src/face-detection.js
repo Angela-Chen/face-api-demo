@@ -1,5 +1,14 @@
 require('./assets/styles/index.less');
 const faceapi = require('./assets/face-api/face-api.js');
+const errorMap = {
+  'NotAllowedError': '摄像头已被禁用，请在当前浏览器设置中开启后重试',
+  'AbortError': '硬件问题，导致无法访问摄像头',
+  'NotFoundError': '未检测到可用摄像头',
+  'NotReadableError': '操作系统上某个硬件、浏览器或者网页层面发生错误，导致无法访问摄像头',
+  'OverConstrainedError': '未检测到可用摄像头',
+  'SecurityError': '摄像头已被禁用，请在系统设置或者浏览器设置中开启后重试',
+  'TypeError': '类型错误，未检测到可用摄像头'
+};
 
 class FaceDetection {
   constructor(options) {
@@ -44,6 +53,9 @@ class FaceDetection {
 
   // 初始化人脸识别
   async initDetection() {
+    // 加载模型
+    faceapi.loadTinyFaceDetectorModel('./assets/face-api/models');
+
     const mediaOpt = {
       video: true
     };
@@ -51,52 +63,33 @@ class FaceDetection {
     if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
       // 最新标准API
       this.mediaStreamTrack = await navigator.mediaDevices.getUserMedia(mediaOpt)
-        .catch(() => {
-          this.cameraDisabledPrompt();
-        });
+        .catch(this.mediaErrorCallback);
     } else if (navigator.webkitGetUserMedia) {
       // webkit内核浏览器
       this.mediaStreamTrack = await navigator.webkitGetUserMedia(mediaOpt)
-        .catch(() => {
-          this.cameraDisabledPrompt();
-        });
+        .catch(this.mediaErrorCallback);
     } else if (navigator.mozGetUserMedia) {
       // Firefox浏览器
       this.mediaStreamTrack = await navigator.mozGetUserMedia(mediaOpt)
-        .catch(() => {
-          this.cameraDisabledPrompt();
-        });
+        .catch(this.mediaErrorCallback);
     } else if (navigator.getUserMedia) {
       // 旧版API
       this.mediaStreamTrack = await navigator.getUserMedia(mediaOpt)
-        .catch(() => {
-          this.cameraDisabledPrompt();
-        });
+        .catch(this.mediaErrorCallback);
     }
-
-    // 加载模型
-    faceapi.loadTinyFaceDetectorModel('./assets/face-api/models');
-
-    this.videoEl.onplay = () => {
-      this.onPlay();
-    };
-    this.videoEl.srcObject = this.mediaStreamTrack;
-
-    // 延时启动
-    setTimeout(() => this.onPlay(), 300);
+    this.initVideo();
   }
 
   // 人脸识别弹框的相关事件绑定
   bindEvents() {
-    // "重新选择" 按钮事件绑定
+    // "重新选择" 按钮
     this.retryBtnEl.onclick = () => {
       if (this.videoEl.paused || this.videoEl.ended) {
         this.hideEl(this.trackBoxEl).hideEl(this.operationEl);
         this.videoEl.play();
       }
     };
-
-    // "开始验证" 按钮事件绑定
+    // "开始验证" 按钮
     this.compareBtnEl.onclick = () => {
       // 获取当前视频流中的图像，并通过 canvas 绘制出来
       this.canvasImgEl.getContext('2d').drawImage(this.videoEl, 0, 0, this.canvasImgEl.width, this.canvasImgEl.height);
@@ -105,6 +98,22 @@ class FaceDetection {
       // 百度人脸识别API要求图片不需要包括头部信息，仅base64编码即可 
       image = image.replace('data:image/png;base64,', '');
     };
+  }
+
+  // 初始化视频流
+  initVideo(stream) {
+    this.videoEl.onplay = () => {
+      this.onPlay();
+    };
+    this.videoEl.srcObject = this.mediaStreamTrack;
+    setTimeout(() => this.onPlay(), 300);
+  }
+
+  // 获取媒体流错误处理
+  mediaErrorCallback(error) {
+    if (errorMap[error.name]) {
+      alert(errorMap[error.name]);
+    }
   }
 
   // 循环监听扫描视频流中的人脸特征
@@ -130,6 +139,7 @@ class FaceDetection {
         this.showEl(this.operationEl);
         // 人脸符合要求，暂停视频流
         this.videoEl.pause();
+        // TODO 调用后端接口进行身份验证
         return;
       }
     }
@@ -161,11 +171,6 @@ class FaceDetection {
 
     // 侦测到人脸后，绘制人脸线框
     faceapi.drawDetection(trackBox, resizedDetections, faceBoxOpts);
-  }
-
-  // 当前浏览器摄像头被禁用的提示信息
-  cameraDisabledPrompt() {
-    alert('摄像头已禁用，请在当前浏览器设置中开启');
   }
 
   showEl(el) {
